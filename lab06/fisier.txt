@@ -1,0 +1,15 @@
+ping
+ping abc
+
+count
+count a b c
+count a
+count a             b
+   count a             b   
+length
+length abcabcabcabcaca xxxx
+times
+times
+times abc
+TIMES
+stop
