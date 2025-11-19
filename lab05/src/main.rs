@@ -7,24 +7,31 @@ struct Student {
 }
 
 fn problema3() {
-    let content = fs::read_to_string("informatii2.json").unwrap();
-    let mut min_age: u16 = 1000;
-    let mut max_age: u16 = 0;
-    let mut nume_min: String = String::new();
-    let mut nume_max: String = String::new();
-    for line in content.lines() {
-        let s: Student = serde_json::from_str(line).unwrap();
-        if s.age > max_age {
-            max_age = s.age;
-            nume_max = s.name.clone();
+    if let Ok(content) = fs::read_to_string("informatii2.json") {
+        let mut min_age: u16 = 1000;
+        let mut max_age: u16 = 0;
+        let mut nume_min: String = String::new();
+        let mut nume_max: String = String::new();
+        for line in content.lines() {
+            let s = match serde_json::from_str::<Student>(line) {
+                Ok(line) => line,
+                Err(_) => {
+                    println!("Eroare la parsare JSON");
+                    continue;
+                }
+            };
+            if s.age > max_age {
+                max_age = s.age;
+                nume_max = s.name.clone();
+            }
+            if s.age < min_age {
+                min_age = s.age;
+                nume_min = s.name.clone();
+            }
         }
-        if s.age < min_age {
-            min_age = s.age;
-            nume_min = s.name.clone();
-        }
+        println!("numele persoanei de varsta maxima este: {nume_max}");
+        println!("numele persoanei de varsta minima este: {nume_min}");
     }
-    println!("numele persoanei de varsta maxima este: {nume_max}");
-    println!("numele persoanei de varsta minima este: {nume_min}");
 }
 
 fn new_canvas() -> [[char; 100]; 55] {
@@ -57,7 +64,7 @@ fn problema2() {
     set_pixels(c, &[(4, 41, 124), (7, 1, 124), (5, 8, 92)]);
     set_pixels(c, &[(1, 31, 40), (2, 3, 95), (2, 41, 124)]);
     set_pixels(
-        c,//Cargo fmt a avut on stroke idk
+        c, 
         &[
             (2, 16, 95),
             (5, 35, 92),
