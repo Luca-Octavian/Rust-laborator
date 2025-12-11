@@ -5,7 +5,7 @@ use ratatui::text::{Span, Line, Text};
 use ratatui::DefaultTerminal;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::{
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, enable_raw_mode, disable_raw_mode},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, enable_raw_mode, disable_raw_mode},//important ca altfel doubled inputs
     execute,
 };
 
@@ -36,7 +36,7 @@ struct Connect4 {
     castigator: Jucator,
     nr_miscari: u8,
     tabla: [[u8; LATIME]; INALTIME],
-    celule_castigatoare: Vec<(usize, usize)>,
+    celule_castigatoare: Vec<(usize, usize)>,//needed this for the green squares
 }
 
 #[derive(Debug)]
@@ -204,8 +204,8 @@ fn run(mut terminal: DefaultTerminal, mut joc: Connect4) -> Result<(), Box<dyn s
     loop {
         terminal.draw(|frame| render(frame, &joc, &mesaj))?;
 
-        if event::poll(std::time::Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
+        if event::poll(std::time::Duration::from_millis(50))?  
+            && let Event::Key(key) = event::read()? {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
@@ -219,7 +219,7 @@ fn run(mut terminal: DefaultTerminal, mut joc: Connect4) -> Result<(), Box<dyn s
                     }
 
                     KeyCode::Char(c) => {
-                        if let Some(col) = c.to_digit(10) {
+                        if let Some(col) = c.to_digit(10) {//warning I can't be bothered to fix rn
                             if col >= 1 && col <= 7 {
                                 let col = (col - 1) as usize;
                                 
@@ -238,7 +238,7 @@ fn run(mut terminal: DefaultTerminal, mut joc: Connect4) -> Result<(), Box<dyn s
 
                     _ => {}
                 }
-            }
+            
         }
     }
 
@@ -248,7 +248,7 @@ fn run(mut terminal: DefaultTerminal, mut joc: Connect4) -> Result<(), Box<dyn s
 fn render(frame: &mut Frame, joc: &Connect4, mesaj: &[Line]) {
     let full = frame.area();
     
-    let left_width = full.width * 2 / 5;
+    let left_width = full.width * 2 / 5;//40/60 cuz any bigger the table box and it just fits even less
     let right_width = full.width - left_width;
 
     let left = Rect {
@@ -273,7 +273,7 @@ fn render(frame: &mut Frame, joc: &Connect4, mesaj: &[Line]) {
             let is_winning = joc.celule_castigatoare.contains(&(r, c));
             
             let piece = if is_winning {
-                "🟩🟩🟩" // Green for winning squares
+                "🟩🟩🟩" //green for winning squares(I had no other ideas)
             } else {
                 match joc.tabla[r][c] {
                     1 => "🟥🟥🟥",
@@ -283,7 +283,7 @@ fn render(frame: &mut Frame, joc: &Connect4, mesaj: &[Line]) {
             };
             
             let cell_with_border = format!(
-                "⬜⬜⬜⬜⬜\n⬜{}⬜\n⬜{}⬜\n⬜{}⬜\n⬜⬜⬜⬜⬜",
+                "⬜⬜⬜⬜⬜\n⬜{}⬜\n⬜{}⬜\n⬜{}⬜\n⬜⬜⬜⬜⬜",//white borders because it looks bad without
                 piece, piece, piece
             );
             
@@ -328,7 +328,7 @@ fn render(frame: &mut Frame, joc: &Connect4, mesaj: &[Line]) {
     frame.render_widget(text, right);
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {//main returns result because my run needs to return a result and it's the thing thaat actually executes and renders the code.
     enable_raw_mode()?;
     
     let mut stdout = std::io::stdout();
