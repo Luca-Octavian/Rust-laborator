@@ -1,9 +1,10 @@
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::{
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode}, //important ca altfel doubled inputs
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::DefaultTerminal;
+use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::prelude::*;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -36,8 +37,9 @@ struct Connect4 {
     castigator: Jucator,
     nr_miscari: u8,
     tabla: [[u8; LATIME]; INALTIME],
-    celule_castigatoare: Vec<(usize, usize)>, //needed this for the green squares
+    celule_castigatoare: Vec<(usize, usize)>,
     joaca_ai: bool,
+    alege_mod: bool,
 }
 
 #[derive(Debug)]
@@ -67,6 +69,7 @@ impl Connect4 {
             tabla: [[0; LATIME]; INALTIME],
             celule_castigatoare: Vec::new(),
             joaca_ai: false,
+            alege_mod: true,
         }
     }
 
@@ -144,18 +147,29 @@ impl Connect4 {
         }
         Ok(())
     }
+
     fn creier_ai(&self) -> usize {
         let mut tabla_preferinte = [0i32; LATIME];
 
-        if let Some(col) = self.castig_posibil(Jucator::AlDoilea as u8) {
-            return col; //verific daca pot castiga AI
+        if let Some(col) = self.castig_posibil(Jucator::AlDoilea as u8)
+            && self.urmatoarea_coloana_goala(col).is_some()
+        {
+            return col;
         }
 
-        if let Some(col) = self.castig_posibil(Jucator::Primul as u8) {
-            return col; //verific daca poate castiga player
+        if let Some(col) = self.castig_posibil(Jucator::Primul as u8)
+            && self.urmatoarea_coloana_goala(col).is_some()
+        {
+            return col;
         }
 
-        for c in 0..LATIME {
+        if let Some(col) = self.detecteaza_amenintare_dubla()
+            && self.urmatoarea_coloana_goala(col).is_some()
+        {
+            return col;
+        }
+
+        for (c, item) in tabla_preferinte.iter_mut().enumerate() {
             if let Some(r) = self.urmatoarea_coloana_goala(c) {
                 let mut tabla_copy = self.tabla;
                 tabla_copy[r][c] = Jucator::AlDoilea as u8;
@@ -171,41 +185,55 @@ impl Connect4 {
                     }
                 }
 
-                tabla_preferinte[c] = ai_score * 10 - enemy_threat * 8; //prioritize a win over defense
+                *item = ai_score * 10 - enemy_threat * 8;
 
                 if c == LATIME / 2 {
-                    tabla_preferinte[c] += 15; //centre bias
+                    *item += 3;
                 }
 
                 if c == LATIME / 2 - 1 || c == LATIME / 2 + 1 {
-                    tabla_preferinte[c] += 10; //center bias but also rows 3 and 5
+                    *item += 2;
                 }
             } else {
-                tabla_preferinte[c] = -1000; //out of bounds
+                *item = -10000;
             }
         }
 
-        let mut max = 0;
-        for i in 0..LATIME {
-            if tabla_preferinte[i] > max {
-                max = tabla_preferinte[i];
+        let mut max = i32::MIN;
+        let mut best_col = LATIME / 2;
+        let mut gasit_miscare_valida = false;
+
+        for (c, &score) in tabla_preferinte.iter().enumerate() {
+            if score > max && self.urmatoarea_coloana_goala(c).is_some() {
+                max = score;
+                best_col = c;
+                gasit_miscare_valida = true;
             }
         }
-        max as usize
+
+        if !gasit_miscare_valida {
+            for c in 0..LATIME {
+                if self.urmatoarea_coloana_goala(c).is_some() {
+                    return c;
+                }
+            }
+        }
+
+        best_col
     }
 
     fn castig_posibil(&self, player: u8) -> Option<usize> {
         for c in 0..LATIME {
             if let Some(r) = self.urmatoarea_coloana_goala(c) {
                 let mut tabla_copy = self.tabla;
-                tabla_copy[r][c] = player; //simulez miscarea urmatoare
+                tabla_copy[r][c] = player;
 
                 let directii = [(0, 1), (1, 0), (1, 1), (-1, 1)];
 
                 for (dr, dc) in directii {
                     let mut consec = 1;
 
-                    let mut rr = r as isize + dr;//check ahead
+                    let mut rr = r as isize + dr;
                     let mut cc = c as isize + dc;
                     while rr >= 0 && rr < INALTIME as isize && cc >= 0 && cc < LATIME as isize {
                         if tabla_copy[rr as usize][cc as usize] == player {
@@ -217,7 +245,7 @@ impl Connect4 {
                         }
                     }
 
-                    rr = r as isize - dr;//check backwards
+                    rr = r as isize - dr;
                     cc = c as isize - dc;
                     while rr >= 0 && rr < INALTIME as isize && cc >= 0 && cc < LATIME as isize {
                         if tabla_copy[rr as usize][cc as usize] == player {
@@ -243,7 +271,6 @@ impl Connect4 {
     }
 
     fn evalueaza_pozitie(&self, row: usize, col: usize, player: u8) -> i32 {
-        //how close is AI to win
         let mut score = 0;
         let directii = [(0, 1), (1, 0), (1, 1), (-1, 1)];
 
@@ -277,10 +304,10 @@ impl Connect4 {
                 }
 
                 line_score += match count {
-                    3 => 100, //castig eminent
-                    2 => 25,  //2 la rand e ok
-                    1 => 5,   //1 slab
-                    _ => 0,   //nimic
+                    3 => 100,
+                    2 => 50,
+                    1 => 5,
+                    _ => 0,
                 };
             }
 
@@ -295,8 +322,6 @@ impl Connect4 {
     }
 
     fn evalueaza_pericol(&self, row: usize, col: usize, enemy: u8) -> i32 {
-        //how close is enemy to win
-
         let mut threat_score = 0;
         let directii = [(0, 1), (1, 0), (1, 1), (-1, 1)];
 
@@ -323,14 +348,93 @@ impl Connect4 {
             }
 
             threat_score += match enemy_count {
-                3 => 100, //ft periculos
-                2 => 30,  //pericol pe aproape
-                1 => 5,   //nimic basically
-                _ => 0,   //nimic
+                3 => 100,
+                2 => 50,
+                1 => 5,
+                _ => 0,
             };
         }
 
         threat_score
+    }
+    fn detecteaza_amenintare_dubla(&self) -> Option<usize> {
+        let player = Jucator::Primul as u8;
+
+        for col in 0..LATIME {
+            if let Some(row) = self.urmatoarea_coloana_goala(col) {
+                let mut tabla_copy = self.tabla;
+                tabla_copy[row][col] = player;
+
+                let directii = [(0, 1), (1, 0), (1, 1), (-1, 1)];
+
+                for (dr, dc) in directii {
+                    let mut consec_stanga = 0;
+                    let mut consec_dreapta = 0;
+
+                    let mut rr = row as isize;
+                    let mut cc = col as isize;
+
+                    while rr >= 0 && rr < INALTIME as isize && cc >= 0 && cc < LATIME as isize {
+                        if tabla_copy[rr as usize][cc as usize] == player {
+                            consec_stanga += 1;
+                        } else {
+                            break;
+                        }
+                        rr -= dr;
+                        cc -= dc;
+                    }
+
+                    rr = row as isize + dr;
+                    cc = col as isize + dc;
+
+                    while rr >= 0 && rr < INALTIME as isize && cc >= 0 && cc < LATIME as isize {
+                        if tabla_copy[rr as usize][cc as usize] == player {
+                            consec_dreapta += 1;
+                        } else {
+                            break;
+                        }
+                        rr += dr;
+                        cc += dc;
+                    }
+
+                    let total = consec_stanga + consec_dreapta;
+
+                    if total == 2 {
+                        let mut empty_spaces = 0;
+
+                        let rr_stanga = row as isize - dr * (consec_stanga as isize + 1);
+                        let cc_stanga = col as isize - dc * (consec_stanga as isize + 1);
+
+                        if rr_stanga >= 0
+                            && rr_stanga < INALTIME as isize
+                            && cc_stanga >= 0
+                            && cc_stanga < LATIME as isize
+                            && tabla_copy[rr_stanga as usize][cc_stanga as usize] == 0
+                        {
+                            empty_spaces += 1;
+                        }
+
+                        let rr_dreapta = row as isize + dr * (consec_dreapta as isize + 1);
+                        let cc_dreapta = col as isize + dc * (consec_dreapta as isize + 1);
+
+                        if rr_dreapta >= 0
+                            && rr_dreapta < INALTIME as isize
+                            && cc_dreapta >= 0
+                            && cc_dreapta < LATIME as isize
+                            && tabla_copy[rr_dreapta as usize][cc_dreapta as usize] == 0
+                        {
+                            empty_spaces += 1;
+                        }
+
+                        if empty_spaces >= 2 {
+                            return Some(col);
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
     fn mesaj_stare(&self) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
@@ -344,16 +448,16 @@ impl Connect4 {
                     )));
                 }
                 Jucator::AlDoilea => {
-                    if self.joaca_ai == false {
+                    if self.joaca_ai {
                         lines.push(Line::from(Span::styled(
-                            "🟨🟨🟨 Jucătorul 2 a câștigat!",
+                            "🟨🟨🟨 Calculatorul a câștigat!",
                             Style::default()
                                 .fg(Color::Yellow)
                                 .add_modifier(Modifier::BOLD),
                         )));
                     } else {
                         lines.push(Line::from(Span::styled(
-                            "🟨🟨🟨 A castigat calculatorul!",
+                            "🟨🟨🟨 Jucătorul 2 a câștigat!",
                             Style::default()
                                 .fg(Color::Yellow)
                                 .add_modifier(Modifier::BOLD),
@@ -384,16 +488,16 @@ impl Connect4 {
                     Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                 ),
                 Jucator::AlDoilea => {
-                    if self.joaca_ai == false {
+                    if self.joaca_ai {
                         Span::styled(
-                            "🟨🟨🟨 Jucătorul 2",
+                            "🟨🟨🟨 Calculator",
                             Style::default()
                                 .fg(Color::Yellow)
                                 .add_modifier(Modifier::BOLD),
                         )
                     } else {
                         Span::styled(
-                            "🟨🟨🟨 Calculator",
+                            "🟨🟨🟨 Jucătorul 2",
                             Style::default()
                                 .fg(Color::Yellow)
                                 .add_modifier(Modifier::BOLD),
@@ -428,7 +532,13 @@ fn run(mut terminal: DefaultTerminal, mut joc: Connect4) -> Result<(), Box<dyn s
     let mut mesaj = Vec::new();
 
     loop {
-        terminal.draw(|frame| render(frame, &joc, &mesaj))?;
+        terminal.draw(|frame| {
+            if joc.alege_mod {
+                render_menu(frame);
+            } else {
+                render(frame, &joc, &mesaj);
+            }
+        })?;
 
         if event::poll(std::time::Duration::from_millis(50))?
             && let Event::Key(key) = event::read()?
@@ -441,20 +551,79 @@ fn run(mut terminal: DefaultTerminal, mut joc: Connect4) -> Result<(), Box<dyn s
                 KeyCode::Char('q') | KeyCode::Esc => break,
 
                 KeyCode::Char('r') => {
-                    joc = Connect4::default();
-                    mesaj.clear();
+                    if !joc.alege_mod {
+                        joc = Connect4::default();
+                        mesaj.clear();
+                    }
+                }
+
+                KeyCode::Char('1') => {
+                    if joc.alege_mod {
+                        joc.alege_mod = false;
+                        joc.joaca_ai = false;
+                    } else if !joc.terminat {
+                        match joc.joaca_miscare(0) {
+                            Ok(_) => {
+                                mesaj.clear();
+
+                                if joc.joaca_ai
+                                    && joc.jucator_actual == Jucator::AlDoilea
+                                    && !joc.terminat
+                                {
+                                    let mutere_ai = joc.creier_ai();
+                                    joc.joaca_miscare(mutere_ai).ok();
+                                }
+                            }
+                            Err(err) => mesaj = joc.mesaj_eroare(&err),
+                        }
+                    }
+                }
+
+                KeyCode::Char('2') => {
+                    if joc.alege_mod {
+                        joc.alege_mod = false;
+                        joc.joaca_ai = true;
+                    } else if !joc.terminat {
+                        match joc.joaca_miscare(1) {
+                            Ok(_) => {
+                                mesaj.clear();
+
+                                if joc.joaca_ai
+                                    && joc.jucator_actual == Jucator::AlDoilea
+                                    && !joc.terminat
+                                {
+                                    let mutere_ai = joc.creier_ai();
+                                    joc.joaca_miscare(mutere_ai).ok();
+                                }
+                            }
+                            Err(err) => mesaj = joc.mesaj_eroare(&err),
+                        }
+                    }
                 }
 
                 KeyCode::Char(c) => {
-                    if let Some(col) = c.to_digit(10) {
-                        //fixed warning
-                        if (1..=7).contains(&col) {
+                    if !joc.alege_mod
+                        && !joc.terminat
+                        && let Some(col) = c.to_digit(10)
+                    {
+                        if (3..=7).contains(&col) {
                             let col = (col - 1) as usize;
 
                             match joc.joaca_miscare(col) {
-                                Ok(_) => mesaj.clear(),
+                                Ok(_) => {
+                                    mesaj.clear();
+
+                                    if joc.joaca_ai
+                                        && joc.jucator_actual == Jucator::AlDoilea
+                                        && !joc.terminat
+                                    {
+                                        let mutere_ai = joc.creier_ai();
+                                        joc.joaca_miscare(mutere_ai).ok();
+                                    }
+                                }
                                 Err(err) => mesaj = joc.mesaj_eroare(&err),
                             }
+                        } else if col < 3 {
                         } else {
                             mesaj = vec![Line::from(Span::styled(
                                 "⚠ Trebuie să apeși o cifră între 1 și 7!",
@@ -472,10 +641,69 @@ fn run(mut terminal: DefaultTerminal, mut joc: Connect4) -> Result<(), Box<dyn s
     Ok(())
 }
 
+fn render_menu(frame: &mut Frame) {
+    let area = frame.area();
+
+    let menu_text = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "🎮 CONNECT 4 🎮",
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(""),
+        Line::from(Span::styled(
+            "ALEGE MODUL DE JOC:",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("[1]", Style::default().fg(Color::Cyan)),
+            Span::styled(" - Doi jucători ", Style::default().fg(Color::White)),
+            Span::raw("(🟥 vs 🟨)"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("[2]", Style::default().fg(Color::Cyan)),
+            Span::styled(" - Calculator ", Style::default().fg(Color::White)),
+            Span::raw("(🟥 vs 🤖)"),
+        ]),
+        Line::from(""),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Apasă Q pentru a ieși",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )),
+    ];
+
+    let menu = Paragraph::new(Text::from(menu_text))
+        .block(
+            Block::default()
+                .title(" MENIU ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::White));
+
+    let vertical = Layout::vertical([Constraint::Percentage(100)]).flex(Flex::Center);
+    let horizontal = Layout::horizontal([Constraint::Percentage(70)]).flex(Flex::Center);
+    let [menu_area] = vertical.areas(area);
+    let [menu_area] = horizontal.areas(menu_area);
+
+    frame.render_widget(menu, menu_area);
+}
+
 fn render(frame: &mut Frame, joc: &Connect4, mesaj: &[Line]) {
     let full = frame.area();
 
-    let left_width = full.width * 2 / 5; //40/60 cuz any bigger the table box and it just fits even less
+    let left_width = full.width * 2 / 5;
     let right_width = full.width - left_width;
 
     let left = Rect {
@@ -500,7 +728,7 @@ fn render(frame: &mut Frame, joc: &Connect4, mesaj: &[Line]) {
             let is_winning = joc.celule_castigatoare.contains(&(r, c));
 
             let piece = if is_winning {
-                "🟩🟩🟩" //green for winning squares(I had no other ideas)
+                "🟩🟩🟩"
             } else {
                 match joc.tabla[r][c] {
                     1 => "🟥🟥🟥",
@@ -510,7 +738,7 @@ fn render(frame: &mut Frame, joc: &Connect4, mesaj: &[Line]) {
             };
 
             let cell_with_border = format!(
-                "⬜⬜⬜⬜⬜\n⬜{}⬜\n⬜{}⬜\n⬜{}⬜\n⬜⬜⬜⬜⬜", //white borders because it looks bad without
+                "⬜⬜⬜⬜⬜\n⬜{}⬜\n⬜{}⬜\n⬜{}⬜\n⬜⬜⬜⬜⬜",
                 piece, piece, piece
             );
 
@@ -522,12 +750,7 @@ fn render(frame: &mut Frame, joc: &Connect4, mesaj: &[Line]) {
     let table = Table::new(rows, vec![Constraint::Length(10); LATIME])
         .block(
             Block::default()
-                .title(Span::styled(
-                    " CONNECT 4 ",
-                    Style::default()
-                        .fg(Color::Magenta)
-                        .add_modifier(Modifier::BOLD),
-                ))
+                .title(" CONNECT 4 ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Blue)),
         )
@@ -557,12 +780,7 @@ fn render(frame: &mut Frame, joc: &Connect4, mesaj: &[Line]) {
     let text = Paragraph::new(Text::from(text_content))
         .block(
             Block::default()
-                .title(Span::styled(
-                    " INFORMAȚII ",
-                    Style::default()
-                        .fg(Color::Magenta)
-                        .add_modifier(Modifier::BOLD),
-                ))
+                .title(" INFORMAȚII ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Blue)),
         )
@@ -571,21 +789,36 @@ fn render(frame: &mut Frame, joc: &Connect4, mesaj: &[Line]) {
     frame.render_widget(text, right);
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    //main returns result because my run needs to return a result and it's the thing thaat actually executes and renders the code.
-    enable_raw_mode()?;
+fn main_safe() -> Result<(), Box<dyn std::error::Error>> {
+    if let Err(e) = enable_raw_mode() {
+        return Err(Box::new(e));
+    }
 
     let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    if let Err(e) = execute!(stdout, EnterAlternateScreen) {
+        return Err(Box::new(e));
+    }
 
     let terminal = ratatui::init();
     let joc = Connect4::default();
 
-    let result = run(terminal, joc);
+    run(terminal, joc)?;
 
     ratatui::restore();
-    execute!(stdout, LeaveAlternateScreen)?;
-    disable_raw_mode()?;
 
-    result
+    if let Err(e) = execute!(stdout, LeaveAlternateScreen) {
+        return Err(Box::new(e));
+    }
+
+    if let Err(e) = disable_raw_mode() {
+        return Err(Box::new(e));
+    }
+
+    Ok(())
+}
+
+fn main() {
+    if let Err(e) = main_safe() {
+        eprintln!("Eroare: {}", e);
+    }
 }
